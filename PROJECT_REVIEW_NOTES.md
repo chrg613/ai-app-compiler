@@ -1,0 +1,4 @@
+- UI Generator still partly hardcoded
+- In-memory backend storage
+- No clarification mode yet
+- Dependency graph still string based
