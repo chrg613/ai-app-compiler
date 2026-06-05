@@ -45,6 +45,18 @@ except Exception as e:
 
 # In-memory storage for demo (replace with database in production)
 COMPILATION_CACHE = {}
+CONVERSATIONS = {}  # conversation_id -> {messages: [], current_intent: {}, status: 'active'}
+import uuid
+import zipfile
+import io
+import json
+
+
+def serialize_result(obj):
+    """JSON serializer for complex objects"""
+    if hasattr(obj, '__dict__'):
+        return obj.__dict__
+    return str(obj)
 
 
 # ============================
@@ -225,6 +237,227 @@ def export_compilation(compilation_id):
     except Exception as e:
         logger.error(f"[Export] Error exporting compilation: {e}")
         return jsonify({'error': 'Export failed'}), 500
+
+
+# ============================
+# Conversation Endpoints (Turn-by-Turn)
+# ============================
+
+@app.route('/api/conversation', methods=['POST'])
+def start_conversation():
+    """Start a new turn-by-turn conversation"""
+    try:
+        conv_id = str(uuid.uuid4())
+        CONVERSATIONS[conv_id] = {
+            'messages': [],
+            'current_intent': None,
+            'status': 'active',
+            'created_at': datetime.utcnow().isoformat()
+        }
+        logger.info(f"[Conversation] Started new conversation: {conv_id}")
+        return jsonify({
+            'status': 'success',
+            'conversation_id': conv_id
+        }), 201
+
+    except Exception as e:
+        logger.error(f"[Conversation] Error starting conversation: {e}")
+        return jsonify({'error': 'Failed to start conversation'}), 500
+
+
+@app.route('/api/conversation/<conv_id>/message', methods=['POST'])
+def add_message(conv_id):
+    """Add a message to conversation and get AI response with assumptions"""
+    try:
+        if conv_id not in CONVERSATIONS:
+            return jsonify({'error': 'Conversation not found'}), 404
+
+        data = request.get_json() or {}
+        user_message = data.get('message', '').strip()
+
+        if not user_message:
+            return jsonify({'error': 'Message is required'}), 400
+
+        conv = CONVERSATIONS[conv_id]
+        
+        # Add user message
+        conv['messages'].append({
+            'role': 'user',
+            'content': user_message,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+        # Build conversation context
+        full_prompt = "\n".join([
+            m['content'] for m in conv['messages'] if m['role'] == 'user'
+        ])
+
+        logger.info(f"[Conversation] Processing message for {conv_id}")
+
+        # Get AI response with assumptions
+        try:
+            result = compiler_pipeline.compile(full_prompt)
+            
+            assumptions = {
+                'entities': [e.name for e in result.intent.entities] if hasattr(result.intent, 'entities') else [],
+                'roles': result.intent.roles if hasattr(result.intent, 'roles') else ['user', 'admin'],
+                'features': result.intent.features if hasattr(result.intent, 'features') else [],
+                'integrations': result.intent.integrations if hasattr(result.intent, 'integrations') else []
+            }
+
+            ai_response = {
+                'type': 'assumptions',
+                'message': f"Based on your requirements, I've identified: {', '.join(assumptions['entities'])} entities",
+                'assumptions': assumptions,
+                'confidence': 0.85,
+                'next_question': "Does this look correct? Any changes or additional requirements?"
+            }
+
+            conv['messages'].append({
+                'role': 'assistant',
+                'content': ai_response['message'],
+                'type': 'assumptions',
+                'assumptions': assumptions,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+
+            conv['current_intent'] = result.intent
+
+            return jsonify({
+                'status': 'success',
+                'conversation_id': conv_id,
+                'response': ai_response,
+                'messages': conv['messages']
+            }), 200
+
+        except Exception as compile_error:
+            logger.error(f"[Conversation] Compilation error: {compile_error}")
+            error_response = f"I need clarification: {str(compile_error)}"
+            conv['messages'].append({
+                'role': 'assistant',
+                'content': error_response,
+                'type': 'clarification',
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            return jsonify({
+                'status': 'clarification_needed',
+                'conversation_id': conv_id,
+                'response': {
+                    'type': 'clarification',
+                    'message': error_response
+                },
+                'messages': conv['messages']
+            }), 200
+
+    except Exception as e:
+        logger.error(f"[Conversation] Error processing message: {e}", exc_info=True)
+        return jsonify({'error': 'Failed to process message'}), 500
+
+
+@app.route('/api/conversation/<conv_id>/refine', methods=['POST'])
+def refine_requirements(conv_id):
+    """User modifies requirements mid-conversation"""
+    try:
+        if conv_id not in CONVERSATIONS:
+            return jsonify({'error': 'Conversation not found'}), 404
+
+        data = request.get_json() or {}
+        changes = data.get('changes', {})
+
+        conv = CONVERSATIONS[conv_id]
+        if not conv['current_intent']:
+            return jsonify({'error': 'No active compilation'}), 400
+
+        # Log refinement
+        refinement_msg = f"Updated requirements: {', '.join(f'{k}: {v}' for k, v in changes.items())}"
+        conv['messages'].append({
+            'role': 'user',
+            'content': refinement_msg,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+        # Recompile with changes
+        full_prompt = "\n".join([
+            m['content'] for m in conv['messages'] if m['role'] == 'user'
+        ])
+
+        result = compiler_pipeline.compile(full_prompt)
+        conv['current_intent'] = result.intent
+
+        return jsonify({
+            'status': 'success',
+            'conversation_id': conv_id,
+            'message': 'Requirements updated and recompiled',
+            'updated_intent': json.loads(json.dumps(result.intent, default=serialize_result))
+        }), 200
+
+    except Exception as e:
+        logger.error(f"[Refine] Error refining requirements: {e}")
+        return jsonify({'error': 'Failed to refine requirements'}), 500
+
+
+@app.route('/api/conversation/<conv_id>/generate-app', methods=['POST'])
+def generate_app(conv_id):
+    """Generate downloadable app from final requirements"""
+    try:
+        if conv_id not in CONVERSATIONS:
+            return jsonify({'error': 'Conversation not found'}), 404
+
+        conv = CONVERSATIONS[conv_id]
+        if not conv['current_intent']:
+            return jsonify({'error': 'No active compilation'}), 400
+
+        # Create in-memory ZIP
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add app code
+            app_py = "# Generated Flask Application\n# See main compilation for full code\n"
+            zf.writestr('app.py', app_py)
+
+            # Add requirements
+            zf.writestr('requirements.txt', 'flask>=3.0.0\nflask-cors>=4.0.0\n')
+
+            # Add README
+            readme = f"# {conv['current_intent'].app_name}\n\n{conv['current_intent'].description}\n"
+            zf.writestr('README.md', readme)
+
+            # Add conversation history
+            history_json = json.dumps(conv['messages'], indent=2, default=serialize_result)
+            zf.writestr('conversation_history.json', history_json)
+
+        zip_buffer.seek(0)
+        
+        logger.info(f"[Generate] Generated app download for conversation {conv_id}")
+
+        return zf.getvalue(), 200, {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': f"attachment; filename=app_{conv_id[:8]}.zip"
+        }
+
+    except Exception as e:
+        logger.error(f"[Generate] Error generating app: {e}")
+        return jsonify({'error': 'Failed to generate app'}), 500
+
+
+@app.route('/api/conversation/<conv_id>', methods=['GET'])
+def get_conversation(conv_id):
+    """Get conversation history and current state"""
+    try:
+        if conv_id not in CONVERSATIONS:
+            return jsonify({'error': 'Conversation not found'}), 404
+
+        conv = CONVERSATIONS[conv_id]
+        return jsonify({
+            'status': 'success',
+            'conversation_id': conv_id,
+            'messages': conv['messages'],
+            'current_intent': json.loads(json.dumps(conv['current_intent'], default=serialize_result)) if conv['current_intent'] else None,
+            'conversation_status': conv['status']
+        }), 200
+
+    except Exception as e:
+        logger.error(f"[Get] Error getting conversation: {e}")
+        return jsonify({'error': 'Failed to get conversation'}), 500
 
 
 # ============================

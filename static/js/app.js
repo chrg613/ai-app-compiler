@@ -1,222 +1,339 @@
-/**
- * AI Application Compiler - Frontend JavaScript
- * Handles UI interactions and API communication
- */
+// AI Application Compiler - Turn-by-Turn Chat Interface
+class CompilerChat {
+  constructor() {
+    this.conversationId = null;
+    this.currentIntent = null;
+    this.isLoading = false;
+    
+    this.init();
+  }
 
-class AppCompiler {
-    constructor() {
-        this.currentResult = null;
-        this.initializeEventListeners();
-        this.loadExamplePrompt();
+  init() {
+    this.cacheDOM();
+    this.attachEventListeners();
+    this.startNewConversation();
+  }
+
+  cacheDOM() {
+    this.userInput = document.getElementById('user-input');
+    this.sendBtn = document.getElementById('send-btn');
+    this.clearBtn = document.getElementById('clear-btn');
+    this.chatMessages = document.getElementById('chat-messages');
+    this.previewContent = document.getElementById('preview-content');
+    this.statusBadge = document.getElementById('status-badge');
+    this.downloadBtn = document.getElementById('download-btn');
+    this.newConvBtn = document.getElementById('new-conversation-btn');
+    
+    this.assumptionsModal = document.getElementById('assumptions-modal');
+    this.assumptionsBody = document.getElementById('assumptions-body');
+    this.approveBtn = document.getElementById('approve-btn');
+    this.modifyBtn = document.getElementById('modify-btn');
+    
+    this.modifyModal = document.getElementById('modify-modal');
+    this.modifyInput = document.getElementById('modify-input');
+    this.applyChangesBtn = document.getElementById('apply-changes-btn');
+    this.cancelChangesBtn = document.getElementById('cancel-changes-btn');
+  }
+
+  attachEventListeners() {
+    this.sendBtn.addEventListener('click', () => this.sendMessage());
+    this.clearBtn.addEventListener('click', () => this.userInput.value = '');
+    this.newConvBtn.addEventListener('click', () => this.startNewConversation());
+    this.downloadBtn.addEventListener('click', () => this.downloadApp());
+    
+    this.userInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) this.sendMessage();
+    });
+
+    this.approveBtn.addEventListener('click', () => this.closeModal(this.assumptionsModal));
+    this.modifyBtn.addEventListener('click', () => this.openModal(this.modifyModal));
+    this.applyChangesBtn.addEventListener('click', () => this.applyChanges());
+    this.cancelChangesBtn.addEventListener('click', () => this.closeModal(this.modifyModal));
+
+    // Modal close buttons
+    document.querySelectorAll('.close-modal').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.target.closest('.modal').classList.add('hidden');
+      });
+    });
+  }
+
+  async startNewConversation() {
+    try {
+      this.statusBadge.textContent = 'Starting...';
+      const response = await fetch('/api/conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) throw new Error('Failed to start conversation');
+      
+      const data = await response.json();
+      this.conversationId = data.conversation_id;
+      this.currentIntent = null;
+      
+      this.chatMessages.innerHTML = `
+        <div class="message assistant-message welcome">
+          <div class="message-content">
+            <h3>👋 Welcome to the AI App Compiler</h3>
+            <p>I'll help you build an application through turn-by-turn conversation. Here's how it works:</p>
+            <ul>
+              <li><strong>Describe your app:</strong> Tell me what you want to build</li>
+              <li><strong>I'll show assumptions:</strong> I'll ask clarifying questions if I'm not confident</li>
+              <li><strong>Refine on the fly:</strong> Change requirements anytime during the conversation</li>
+              <li><strong>Download when ready:</strong> Export your complete app as a ZIP file</li>
+            </ul>
+            <p><strong>Let's start! What would you like to build?</strong></p>
+          </div>
+        </div>
+      `;
+      
+      this.previewContent.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">🚀</div>
+          <p>Your app structure will appear here</p>
+        </div>
+      `;
+      
+      this.downloadBtn.disabled = true;
+      this.statusBadge.textContent = 'Ready';
+      console.log('[Chat] Started conversation:', this.conversationId);
+    } catch (error) {
+      console.error('[Chat] Error starting conversation:', error);
+      this.addMessage('assistant', '❌ Failed to start conversation. Please refresh the page.');
+      this.statusBadge.textContent = 'Error';
     }
+  }
 
-    initializeEventListeners() {
-        document.getElementById('compileBtn').addEventListener('click', () => this.compile());
-        document.getElementById('clearBtn').addEventListener('click', () => this.clear());
-        document.getElementById('downloadBtn').addEventListener('click', () => this.downloadJSON());
+  async sendMessage() {
+    const message = this.userInput.value.trim();
+    if (!message || this.isLoading) return;
 
-        // Tab navigation
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
-        });
+    this.isLoading = true;
+    this.sendBtn.disabled = true;
+    this.statusBadge.textContent = 'Processing...';
 
-        // Allow Enter+Cmd/Ctrl to compile
-        document.getElementById('promptInput').addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                this.compile();
-            }
-        });
+    try {
+      // Add user message to chat
+      this.addMessage('user', message);
+      this.userInput.value = '';
+
+      // Send to backend
+      const response = await fetch(`/api/conversation/${this.conversationId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      if (!response.ok) throw new Error('Failed to send message');
+
+      const data = await response.json();
+      
+      if (data.status === 'success' && data.response.type === 'assumptions') {
+        // Show assumptions modal
+        this.showAssumptions(data.response);
+        this.currentIntent = data.response.assumptions;
+        this.updatePreview(data.response.assumptions);
+        this.downloadBtn.disabled = false;
+      } else if (data.status === 'clarification_needed') {
+        this.addMessage('assistant', data.response.message);
+      }
+
+      console.log('[Chat] Message sent successfully');
+    } catch (error) {
+      console.error('[Chat] Error sending message:', error);
+      this.addMessage('assistant', `❌ Error: ${error.message}`);
+    } finally {
+      this.isLoading = false;
+      this.sendBtn.disabled = false;
+      this.statusBadge.textContent = 'Ready';
     }
+  }
 
-    loadExamplePrompt() {
-        const examples = [
-            "Build a CRM system with Users, Contacts, Companies, and Deals. Include role-based access (admin/user), email integration, and activity tracking.",
-            "Create an inventory management system with Products, Warehouses, Orders, and Suppliers. Include real-time stock tracking and low-stock alerts.",
-            "Build a social media platform with Users, Posts, Comments, Likes, and Followers. Include notifications and user profiles."
-        ];
+  addMessage(role, content) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}-message`;
+    
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    messageDiv.innerHTML = `
+      <div class="message-content">
+        <p>${this.escapeHtml(content)}</p>
+        <small class="timestamp">${timestamp}</small>
+      </div>
+    `;
+    
+    this.chatMessages.appendChild(messageDiv);
+    this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+  }
+
+  showAssumptions(response) {
+    const { assumptions, confidence, next_question } = response;
+    
+    const html = `
+      <div class="assumptions-container">
+        <div class="assumption-item">
+          <h4>📊 Confidence: <strong>${(confidence * 100).toFixed(0)}%</strong></h4>
+        </div>
         
-        // Randomly select an example on page load
-        const randomExample = examples[Math.floor(Math.random() * examples.length)];
-        // Uncomment to show example
-        // document.getElementById('promptInput').placeholder = randomExample;
+        <div class="assumption-item">
+          <h4>🏗️ Entities (${assumptions.entities.length})</h4>
+          <ul class="assumption-list">
+            ${assumptions.entities.map(e => `<li>${e}</li>`).join('')}
+          </ul>
+        </div>
+
+        <div class="assumption-item">
+          <h4>👥 Roles (${assumptions.roles.length})</h4>
+          <ul class="assumption-list">
+            ${assumptions.roles.map(r => `<li>${r}</li>`).join('')}
+          </ul>
+        </div>
+
+        <div class="assumption-item">
+          <h4>✨ Features (${assumptions.features.length})</h4>
+          <ul class="assumption-list">
+            ${assumptions.features.slice(0, 5).map(f => `<li>${f}</li>`).join('')}
+            ${assumptions.features.length > 5 ? `<li>... and ${assumptions.features.length - 5} more</li>` : ''}
+          </ul>
+        </div>
+
+        <div class="assumption-item">
+          <h4>🔗 Integrations (${assumptions.integrations.length})</h4>
+          <ul class="assumption-list">
+            ${assumptions.integrations.length > 0 ? assumptions.integrations.map(i => `<li>${i}</li>`).join('') : '<li>None</li>'}
+          </ul>
+        </div>
+
+        <div class="next-question">
+          <p><strong>❓ ${next_question}</strong></p>
+        </div>
+      </div>
+    `;
+    
+    this.assumptionsBody.innerHTML = html;
+    this.openModal(this.assumptionsModal);
+  }
+
+  updatePreview(assumptions) {
+    const html = `
+      <div class="preview-structure">
+        <div class="structure-section">
+          <h4>🏗️ Database Entities</h4>
+          <div class="structure-list">
+            ${assumptions.entities.map(e => `<div class="structure-item">${e}</div>`).join('')}
+          </div>
+        </div>
+
+        <div class="structure-section">
+          <h4>👥 User Roles</h4>
+          <div class="structure-list">
+            ${assumptions.roles.map(r => `<div class="structure-item">${r}</div>`).join('')}
+          </div>
+        </div>
+
+        <div class="structure-section">
+          <h4>✨ Key Features</h4>
+          <div class="structure-list">
+            ${assumptions.features.slice(0, 4).map(f => `<div class="structure-item">${f}</div>`).join('')}
+          </div>
+        </div>
+
+        <div class="structure-section">
+          <h4>🔗 Integrations</h4>
+          <div class="structure-list">
+            ${assumptions.integrations.length > 0 ? assumptions.integrations.map(i => `<div class="structure-item">${i}</div>`).join('') : '<div class="structure-item">None</div>'}
+          </div>
+        </div>
+      </div>
+    `;
+    
+    this.previewContent.innerHTML = html;
+  }
+
+  async applyChanges() {
+    const changes = this.modifyInput.value.trim();
+    if (!changes) {
+      alert('Please enter what you want to change');
+      return;
     }
 
-    async compile() {
-        const prompt = document.getElementById('promptInput').value.trim();
-        
-        if (!prompt) {
-            this.showError('Please enter an application description');
-            return;
-        }
+    this.closeModal(this.modifyModal);
+    this.addMessage('user', `Changes: ${changes}`);
+    
+    try {
+      const response = await fetch(`/api/conversation/${this.conversationId}/refine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes })
+      });
 
-        this.showLoading();
-        this.hideError();
+      if (!response.ok) throw new Error('Failed to apply changes');
 
-        try {
-            console.log('[v0] Sending compilation request...');
-            const response = await fetch('/api/compile', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ prompt })
-            });
+      const data = await response.json();
+      this.addMessage('assistant', '✅ Requirements updated and recompiled!');
+      this.modifyInput.value = '';
+    } catch (error) {
+      console.error('[Chat] Error applying changes:', error);
+      this.addMessage('assistant', `❌ Error applying changes: ${error.message}`);
+    }
+  }
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Compilation failed');
-            }
-
-            const data = await response.json();
-            console.log('[v0] Compilation successful:', data);
-
-            this.currentResult = data;
-            this.displayResults(data);
-            this.hideLoading();
-            
-            // Scroll to results
-            document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
-
-        } catch (error) {
-            console.error('[v0] Compilation error:', error);
-            this.showError(error.message);
-            this.hideLoading();
-        }
+  async downloadApp() {
+    if (!this.conversationId) {
+      alert('No active conversation to download');
+      return;
     }
 
-    displayResults(data) {
-        document.getElementById('resultsSection').style.display = 'block';
+    try {
+      this.downloadBtn.disabled = true;
+      this.downloadBtn.textContent = '📥 Downloading...';
 
-        // Update overview tab
-        document.getElementById('appName').textContent = data.app_name;
-        document.getElementById('overviewApp').textContent = data.app_name;
-        document.getElementById('overviewDesc').textContent = data.description || 'Application for ' + data.app_name;
+      const response = await fetch(`/api/conversation/${this.conversationId}/generate-app`, {
+        method: 'POST'
+      });
 
-        // Entities
-        const entitiesList = document.getElementById('overviewEntities');
-        entitiesList.innerHTML = data.entities.map(e => `<li><strong>${e.name}</strong> (${e.attributes.length} fields)</li>`).join('');
+      if (!response.ok) throw new Error('Failed to generate app');
 
-        // Roles
-        const rolesList = document.getElementById('overviewRoles');
-        rolesList.innerHTML = data.roles.map(r => `<li>${r}</li>`).join('');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `app_${this.conversationId.slice(0, 8)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
-        // Features
-        const featuresList = document.getElementById('overviewFeatures');
-        featuresList.innerHTML = data.features.map(f => `<li>${f}</li>`).join('');
-
-        // Integrations
-        const integrationsList = document.getElementById('overviewIntegrations');
-        integrationsList.innerHTML = data.integrations.length > 0 
-            ? data.integrations.map(i => `<li>${i}</li>`).join('')
-            : '<li>None specified</li>';
-
-        // Database Schema
-        const dbContent = document.getElementById('dbContent');
-        dbContent.innerHTML = `<pre>${JSON.stringify(data.database_schema, null, 2)}</pre>`;
-
-        // API Schema
-        const apiContent = document.getElementById('apiContent');
-        const apiEndpoints = data.api_schema.endpoints.map(e => 
-            `${e.method.padEnd(8)} ${e.path.padEnd(30)} → ${e.entity_name}`
-        ).join('\n');
-        apiContent.innerHTML = `<pre>Endpoints (${data.api_schema.endpoints.length}):\n\n${apiEndpoints}</pre>`;
-
-        // UI Schema
-        const uiContent = document.getElementById('uiContent');
-        const uiPages = data.ui_schema.pages.map(p => 
-            `${p.name.padEnd(25)} Route: ${p.route || '/'}  Auth: ${p.requires_auth}`
-        ).join('\n');
-        uiContent.innerHTML = `<pre>Pages (${data.ui_schema.pages.length}):\n\n${uiPages}</pre>`;
-
-        // Auth Schema
-        const authContent = document.getElementById('authContent');
-        authContent.innerHTML = `<pre>${JSON.stringify(data.auth_schema, null, 2)}</pre>`;
-
-        // Diagnostics
-        const confidenceScore = document.getElementById('confidenceScore');
-        const confidence = Math.round(data.diagnostics.confidence * 100);
-        confidenceScore.textContent = `${confidence}%`;
-        confidenceScore.style.color = confidence > 80 ? '#10b981' : confidence > 60 ? '#f59e0b' : '#ef4444';
-
-        const warningsList = document.getElementById('warningsList');
-        warningsList.innerHTML = data.diagnostics.warnings.length > 0
-            ? data.diagnostics.warnings.map(w => `<li>${w}</li>`).join('')
-            : '<li>No warnings</li>';
-
-        const assumptionsList = document.getElementById('assumptionsList');
-        assumptionsList.innerHTML = data.diagnostics.assumptions.length > 0
-            ? data.diagnostics.assumptions.map(a => `<li>${a}</li>`).join('')
-            : '<li>No assumptions needed</li>';
-
-        const repairsList = document.getElementById('repairsList');
-        repairsList.innerHTML = data.diagnostics.repairs.length > 0
-            ? data.diagnostics.repairs.map(r => `<li>${r}</li>`).join('')
-            : '<li>No repairs needed</li>';
-
-        // Switch to overview tab
-        this.switchTab('overview');
+      this.addMessage('assistant', '✅ App downloaded successfully!');
+      console.log('[Chat] App downloaded');
+    } catch (error) {
+      console.error('[Chat] Error downloading app:', error);
+      alert(`Error downloading app: ${error.message}`);
+    } finally {
+      this.downloadBtn.disabled = false;
+      this.downloadBtn.textContent = '📥 Download App';
     }
+  }
 
-    switchTab(tabName) {
-        // Hide all tabs
-        document.querySelectorAll('.tab-pane').forEach(pane => {
-            pane.classList.remove('active');
-        });
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
+  openModal(modal) {
+    modal.classList.remove('hidden');
+  }
 
-        // Show selected tab
-        document.getElementById(tabName).classList.add('active');
-        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-    }
+  closeModal(modal) {
+    modal.classList.add('hidden');
+  }
 
-    downloadJSON() {
-        if (!this.currentResult) return;
-
-        const jsonStr = JSON.stringify(this.currentResult, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${this.currentResult.app_name}_specification.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-
-    clear() {
-        document.getElementById('promptInput').value = '';
-        document.getElementById('resultsSection').style.display = 'none';
-        this.hideError();
-        this.hideLoading();
-    }
-
-    showLoading() {
-        document.getElementById('loadingMsg').style.display = 'flex';
-        document.getElementById('compileBtn').disabled = true;
-    }
-
-    hideLoading() {
-        document.getElementById('loadingMsg').style.display = 'none';
-        document.getElementById('compileBtn').disabled = false;
-    }
-
-    showError(message) {
-        const errorMsg = document.getElementById('errorMsg');
-        errorMsg.textContent = message;
-        errorMsg.style.display = 'block';
-    }
-
-    hideError() {
-        document.getElementById('errorMsg').style.display = 'none';
-    }
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 }
 
-// Initialize app when DOM is ready
+// Initialize chat when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[v0] Initializing AI Application Compiler...');
-    window.appCompiler = new AppCompiler();
-    console.log('[v0] Application ready');
+  console.log('[Chat] Initializing AI Application Compiler Chat...');
+  window.compilerChat = new CompilerChat();
+  console.log('[Chat] Application ready');
 });

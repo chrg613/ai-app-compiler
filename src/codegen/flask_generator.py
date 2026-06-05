@@ -183,8 +183,8 @@ class FlaskGenerator:
         return [
             "",
             "# Health check endpoint",
-            "@app.route('/health')",
-            "def health():",
+            "@app.route('/app-health')",
+            "def app_health():",
             "    return jsonify({'status': 'healthy'}), 200",
             "",
             "if __name__ == '__main__':",
