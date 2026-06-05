@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Application Compiler - Turn-by-Turn Chat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="compiler-container">
+        <!-- Left Panel: Chat -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <h1>🤖 AI Application Compiler</h1>
+                <p class="subtitle">Build your app through conversation</p>
+            </div>
+
+            <div id="chat-messages" class="chat-messages">
+                <div class="message assistant-message welcome">
+                    <div class="message-content">
+                        <h3>👋 Welcome to the AI App Compiler</h3>
+                        <p>I'll help you build an application through turn-by-turn conversation. Here's how it works:</p>
+                        <ul>
+                            <li><strong>Describe your app:</strong> Tell me what you want to build</li>
+                            <li><strong>I'll show assumptions:</strong> I'll ask clarifying questions if I'm not confident</li>
+                            <li><strong>Refine on the fly:</strong> Change requirements anytime during the conversation</li>
+                            <li><strong>Download when ready:</strong> Export your complete app as a ZIP file</li>
+                        </ul>
+                        <p><strong>Let's start! What would you like to build?</strong></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <textarea 
+                    id="user-input" 
+                    class="chat-input" 
+                    placeholder="Describe your app requirements here..."
+                    rows="3"></textarea>
+                <div class="input-actions">
+                    <button id="send-btn" class="btn btn-primary">Send</button>
+                    <button id="clear-btn" class="btn btn-secondary">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Preview & Status -->
+        <div class="preview-panel">
+            <div class="preview-header">
+                <h2>📋 App Structure</h2>
+                <div class="status-badge" id="status-badge">Ready</div>
+            </div>
+
+            <div id="preview-content" class="preview-content">
+                <div class="empty-state">
+                    <div class="icon">🚀</div>
+                    <p>Your app structure will appear here</p>
+                </div>
+            </div>
+
+            <div class="preview-footer">
+                <button id="download-btn" class="btn btn-success" disabled>
+                    📥 Download App
+                </button>
+                <button id="new-conversation-btn" class="btn btn-secondary">
+                    ➕ New Chat
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for showing assumptions -->
+    <div id="assumptions-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📊 My Assumptions</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="assumptions-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="approve-btn">✓ Looks Good</button>
+                <button class="btn btn-secondary" id="modify-btn">✎ Change Something</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for modifying requirements -->
+    <div id="modify-modal" class="modal hidden">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>✎ Modify Requirements</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modify-section">
+                    <label>What would you like to change?</label>
+                    <textarea id="modify-input" class="full-width" rows="5" placeholder="E.g., Add a Payment entity, Change roles to (admin, manager, user), etc."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="apply-changes-btn">Apply Changes</button>
+                <button class="btn btn-secondary" id="cancel-changes-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
