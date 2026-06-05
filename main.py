@@ -5,210 +5,260 @@ Main entry point for the application compiler backend and API
 
 import os
 import logging
+import sys
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import json
-from datetime import datetime
 
+from src.config import Config
 from src.llm.providers.openrouter_provider import OpenRouterProvider
 from src.pipeline.compiler_pipeline import CompilerPipeline
 from src.intent.extractor import IntentExtractor
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(name)s - %(levelname)s - %(message)s'
-)
+# Setup configuration and logging early
+Config.setup_logging()
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-CORS(app)
+# Validate configuration on startup
+is_valid, errors = Config.validate()
+if not is_valid:
+    logger.error("Configuration validation failed:")
+    for error in errors:
+        logger.error(f"  - {error}")
+    sys.exit(1)
 
-# Initialize LLM Provider
-api_key = os.getenv("OPENROUTER_API_KEY")
-if not api_key:
-    logger.warning(" OPENROUTER_API_KEY not set. Using fallback.")
-    api_key = "test-key"
+# Initialize Flask app
+app = Flask(__name__, static_folder='static', template_folder='templates')
+app.config.from_object(Config)
+CORS(app, origins=Config.CORS_ORIGINS)
 
-llm_provider = OpenRouterProvider(api_key)
-intent_extractor = IntentExtractor(llm_provider)
-compiler_pipeline = CompilerPipeline(intent_extractor)
+# Initialize LLM provider and pipeline
+try:
+    logger.info("[Main] Initializing LLM provider...")
+    llm_provider = OpenRouterProvider(Config.LLM_API_KEY)
+    intent_extractor = IntentExtractor(llm_provider)
+    compiler_pipeline = CompilerPipeline(intent_extractor)
+    logger.info("[Main] Pipeline initialized successfully")
+except Exception as e:
+    logger.error(f"[Main] Failed to initialize pipeline: {e}")
+    sys.exit(1)
 
 # In-memory storage for demo (replace with database in production)
 COMPILATION_CACHE = {}
 
 
+# ============================
+# UI Routes
+# ============================
+
 @app.route('/')
 def index():
     """Serve the main application UI"""
-    return render_template('index.html')
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f"[Main] Error serving index: {e}")
+        return jsonify({'error': 'UI not available'}), 500
 
+
+# ============================
+# Health & Status Endpoints
+# ============================
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'environment': Config.ENV
+    }), 200
+
+
+@app.route('/api/status')
+def status():
+    """Get system status and configuration (no secrets)"""
+    return jsonify({
+        'status': 'ready',
+        'config': Config.to_dict(),
+        'cache_size': len(COMPILATION_CACHE)
+    }), 200
+
+
+# ============================
+# Compilation Endpoints
+# ============================
 
 @app.route('/api/compile', methods=['POST'])
 def compile_app():
     """
     Main endpoint: compile a natural language prompt into an app specification
+    
+    Request body:
+    {
+        "prompt": "description of the app to build"
+    }
+    
+    Response:
+    {
+        "status": "success",
+        "id": "compilation_id",
+        "result": {
+            "intent": {...},
+            "database_schema": {...},
+            "api_schema": {...},
+            "ui_schema": {...},
+            "auth_schema": {...},
+            "diagnostics": {...}
+        }
+    }
     """
     try:
-        data = request.json
+        data = request.get_json() or {}
         prompt = data.get('prompt', '').strip()
 
         if not prompt:
-            return jsonify({
-                'error': 'Prompt is required',
-                'status': 'FAIL'
-            }), 400
+            logger.warning("[Compile] Empty prompt received")
+            return jsonify({'error': 'Prompt is required'}), 400
 
-        logger.info(f"[v0] Compiling prompt: {prompt[:100]}...")
+        if len(prompt) > 5000:
+            logger.warning("[Compile] Prompt too long")
+            return jsonify({'error': 'Prompt too long (max 5000 chars)'}), 400
 
-        # Compile using the pipeline
+        logger.info(f"[Compile] Processing prompt ({len(prompt)} chars)")
+
+        # Run compilation pipeline
         result = compiler_pipeline.compile(prompt)
 
-        # Cache the result
-        request_id = datetime.now().isoformat()
-        COMPILATION_CACHE[request_id] = result
+        # Cache result
+        compilation_id = str(len(COMPILATION_CACHE))
+        COMPILATION_CACHE[compilation_id] = {
+            'prompt': prompt,
+            'result': result,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
+        logger.info(f"[Compile] Compilation #{compilation_id} successful")
 
         return jsonify({
-            'status': 'SUCCESS',
-            'request_id': request_id,
-            'app_name': result['ir'].app_name,
-            'description': result['ir'].description,
-            'entities': [
-                {
-                    'name': e.name,
-                    'attributes': [
-                        {
-                            'name': a.name,
-                            'type': a.type,
-                            'nullable': a.nullable,
-                            'is_primary': a.is_primary
-                        }
-                        for a in e.attributes
-                    ]
-                }
-                for e in result['ir'].entities
-            ],
-            'roles': result['ir'].roles,
-            'features': result['ir'].features,
-            'integrations': [i.name for i in result['ir'].integrations],
-            'database_schema': {
-                'tables': [
-                    {
-                        'name': t.name,
-                        'columns': [
-                            {
-                                'name': c.name,
-                                'type': c.type,
-                                'nullable': c.nullable,
-                                'is_primary': c.is_primary
-                            }
-                            for c in t.columns
-                        ]
-                    }
-                    for t in result['database'].tables
-                ]
-            },
-            'api_schema': {
-                'endpoints': [
-                    {
-                        'path': e.path,
-                        'method': e.method,
-                        'entity_name': e.entity_name,
-                        'description': e.description,
-                        'requires_auth': e.requires_auth
-                    }
-                    for e in result['api'].endpoints
-                ]
-            },
-            'ui_schema': {
-                'pages': [
-                    {
-                        'name': p.name,
-                        'route': p.route,
-                        'description': p.description,
-                        'requires_auth': p.requires_auth
-                    }
-                    for p in result['ui'].pages
-                ]
-            },
-            'auth_schema': {
-                'roles': [
-                    {
-                        'name': r.name,
-                        'permissions': [
-                            {
-                                'name': p.name,
-                                'resource': p.resource,
-                                'action': p.action
-                            }
-                            for p in r.permissions
-                        ]
-                    }
-                    for r in result['auth'].roles
-                ]
-            },
-            'diagnostics': {
-                'warnings': result['diagnostics'].warnings,
-                'assumptions': result['diagnostics'].assumptions,
-                'repairs': result['diagnostics'].repairs,
-                'confidence': result['diagnostics'].confidence,
-                'generation_time_ms': result['diagnostics'].generation_time_ms
-            }
-        })
+            'status': 'success',
+            'id': compilation_id,
+            'result': result
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"[Compile] Validation error: {e}")
+        return jsonify({'error': str(e)}), 400
 
     except Exception as e:
-        logger.error(f"[v0] Compilation error: {str(e)}", exc_info=True)
+        logger.error(f"[Compile] Unexpected error: {e}", exc_info=True)
+        return jsonify({'error': 'Compilation failed'}), 500
+
+
+@app.route('/api/compile/<compilation_id>', methods=['GET'])
+def get_compilation(compilation_id):
+    """Retrieve a previously compiled specification"""
+    try:
+        if compilation_id not in COMPILATION_CACHE:
+            return jsonify({'error': 'Compilation not found'}), 404
+
+        cached = COMPILATION_CACHE[compilation_id]
         return jsonify({
-            'error': str(e),
-            'status': 'FAIL'
-        }), 500
+            'status': 'found',
+            'id': compilation_id,
+            'timestamp': cached['timestamp'],
+            'result': cached['result']
+        }), 200
+
+    except Exception as e:
+        logger.error(f"[Get] Error retrieving compilation: {e}")
+        return jsonify({'error': 'Failed to retrieve compilation'}), 500
 
 
-@app.route('/api/schema/<request_id>', methods=['GET'])
-def get_schema(request_id):
-    """Retrieve cached compilation result"""
-    if request_id not in COMPILATION_CACHE:
-        return jsonify({'error': 'Request not found'}), 404
+@app.route('/api/compile', methods=['GET'])
+def list_compilations():
+    """List all cached compilations"""
+    try:
+        compilations = [
+            {
+                'id': cid,
+                'timestamp': cached['timestamp'],
+                'prompt_length': len(cached['prompt'])
+            }
+            for cid, cached in COMPILATION_CACHE.items()
+        ]
+        return jsonify({
+            'status': 'success',
+            'total': len(compilations),
+            'compilations': compilations
+        }), 200
 
-    result = COMPILATION_CACHE[request_id]
-    return jsonify({
-        'ir': result['ir'].dict(),
-        'database': result['database'].dict(),
-        'api': result['api'].dict(),
-        'ui': result['ui'].dict(),
-        'auth': result['auth'].dict(),
-        'diagnostics': result['diagnostics'].dict()
-    })
-
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'service': 'ai-app-compiler',
-        'version': '2.0.0'
-    })
+    except Exception as e:
+        logger.error(f"[List] Error listing compilations: {e}")
+        return jsonify({'error': 'Failed to list compilations'}), 500
 
 
-@app.route('/api/models', methods=['GET'])
-def list_models():
-    """List available LLM models"""
-    return jsonify({
-        'models': [
-            'deepseek/deepseek-chat-v3-0324',
-            'openai/gpt-4',
-            'anthropic/claude-3-opus'
-        ],
-        'current': 'deepseek/deepseek-chat-v3-0324'
-    })
+# ============================
+# Export Endpoints
+# ============================
 
+@app.route('/api/compile/<compilation_id>/export', methods=['GET'])
+def export_compilation(compilation_id):
+    """Export compilation result as downloadable files"""
+    try:
+        if compilation_id not in COMPILATION_CACHE:
+            return jsonify({'error': 'Compilation not found'}), 404
+
+        result = COMPILATION_CACHE[compilation_id]['result']
+        export_format = request.args.get('format', 'json')
+
+        if export_format == 'json':
+            return jsonify(result), 200
+
+        elif export_format == 'yaml':
+            # TODO: Implement YAML export
+            return jsonify({'error': 'YAML export not yet implemented'}), 501
+
+        else:
+            return jsonify({'error': 'Unknown export format'}), 400
+
+    except Exception as e:
+        logger.error(f"[Export] Error exporting compilation: {e}")
+        return jsonify({'error': 'Export failed'}), 500
+
+
+# ============================
+# Error Handlers
+# ============================
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    logger.error(f"[Error] Internal server error: {error}")
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============================
+# Application Entry Point
+# ============================
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('FLASK_ENV') == 'development'
-    
-    logger.info(f"[v0] Starting AI Application Compiler on port {port}")
-    logger.info("[v0] Pipeline: Prompt → Intent → IR → Schemas → Validation → Runtime Simulator → Diagnostics")
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    port = Config.PORT
+    debug = Config.DEBUG
+
+    logger.info(f"[Main] Starting server on {Config.HOST}:{port}")
+    logger.info(f"[Main] Debug mode: {debug}")
+    logger.info(f"[Main] Configuration: {Config.to_dict()}")
+
+    app.run(
+        host=Config.HOST,
+        port=port,
+        debug=debug,
+        use_reloader=False  # Important for Vercel deployment
+    )

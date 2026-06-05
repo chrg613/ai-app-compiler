@@ -1,14 +1,16 @@
 {
   "name": "ai-app-compiler",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Production-ready AI Application Compiler with full multi-stage pipeline",
   "engines": {
     "node": ">=16.0.0"
   },
   "scripts": {
-    "build": "docker build -t ai-app-compiler:latest .",
-    "dev": "flask --app main run --debug",
-    "start": "gunicorn --bind 0.0.0.0:5000 --workers 4 main:app",
+    "build": "echo 'Build handled by vercel.json' && npm ci",
+    "dev": "python main.py",
+    "start": "python main.py",
+    "validate": "python -m py_compile src/**/*.py main.py wsgi.py",
+    "docker:build": "docker build -t ai-app-compiler:latest .",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f"
@@ -20,8 +22,12 @@
     "application-builder",
     "schema-generation",
     "python",
-    "flask"
+    "flask",
+    "llm"
   ],
   "author": "AI Compiler Team",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {},
+  "dependencies": {}
 }
+

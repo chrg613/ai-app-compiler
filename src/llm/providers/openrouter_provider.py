@@ -9,41 +9,40 @@ from src.models.contracts import (
     AttributeModel,
     IntentExtractionResult
 )
-
-from src.llm.providers.base_provider import (
-    BaseLLMProvider
-)
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 
 
-class OpenRouterProvider(
-    BaseLLMProvider
-):
+class OpenRouterProvider:
+    """
+    OpenRouter LLM provider for intent extraction.
+    Uses configurable model and parameters from Config.
+    """
 
-    def __init__(
-        self,
-        api_key: str
-    ):
-        if not api_key:
+    def __init__(self, api_key: str = None):
+        """Initialize provider with optional API key override"""
+        key = api_key or Config.LLM_API_KEY
+        if not key:
             raise ValueError(
-                "OPENROUTER_API_KEY not found"
+                "LLM API key not found. Set OPENROUTER_API_KEY environment variable."
             )
-    
+
         self.client = OpenAI(
-            api_key=api_key.strip(),
+            api_key=key.strip(),
             base_url="https://openrouter.ai/api/v1"
         )
+        self.model = Config.LLM_MODEL
+        self.temperature = Config.LLM_TEMPERATURE
+        self.max_tokens = Config.LLM_MAX_TOKENS
 
-    def extract_intent(
-        self,
-        prompt: str
-    ) -> IntentExtractionResult:
-        """
-        Enhanced intent extraction with structured attribute discovery.
-        The LLM now returns detailed entity definitions instead of just names.
-        """
+        logger.info(f"[OpenRouter] Initialized with model: {self.model}")
 
+    def extract_intent(self, prompt: str) -> IntentExtractionResult:
+        """
+        Extract structured intent from natural language prompt.
+        Returns IntentModel with full entity definitions.
+        """
         system_prompt = """You are an AI application compiler. Your role is to analyze application requirements and produce a complete, structured specification.
 
 CRITICAL: Return ONLY valid JSON. No markdown, no explanations, just pure JSON.
@@ -97,13 +96,15 @@ RULES:
 - If emails are mentioned, include SendGrid or similar
 - Be thorough with attributes - don't leave entities empty
 - Attribute types MUST be one of: uuid|text|integer|boolean|timestamp|float|date|json|array
-"""
+- Validate all JSON output before returning"""
 
-        response = (
-            self.client.chat.completions.create(
-                model="deepseek/deepseek-chat-v3-0324",
-                temperature=0.1,
-                max_tokens=4096,
+        try:
+            logger.debug(f"[OpenRouter] Calling {self.model} for intent extraction")
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
                 messages=[
                     {
                         "role": "system",
@@ -115,90 +116,100 @@ RULES:
                     }
                 ]
             )
-        )
 
-        raw = (
-            response
-            .choices[0]
-            .message
-            .content
-        )
+            raw = response.choices[0].message.content.strip()
 
-        raw = raw.strip()
+            # Clean markdown formatting if present
+            if raw.startswith("```json"):
+                raw = raw.replace("```json", "", 1)
+            if raw.startswith("```"):
+                raw = raw.replace("```", "", 1)
+            if raw.endswith("```"):
+                raw = raw[:-3]
 
-        # Clean markdown formatting if present
-        if raw.startswith("```json"):
-            raw = raw.replace("```json", "", 1)
-        if raw.startswith("```"):
-            raw = raw.replace("```", "", 1)
-        if raw.endswith("```"):
-            raw = raw[:-3]
+            raw = raw.strip()
 
-        raw = raw.strip()
+            # Parse JSON response
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                logger.error(f"[OpenRouter] Failed to parse JSON: {e}")
+                logger.error(f"[OpenRouter] Raw response: {raw[:500]}")
+                raise ValueError(f"Invalid JSON from LLM: {str(e)}")
 
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            logger.error(f"[v0] Failed to parse LLM JSON response: {e}")
-            logger.error(f"[v0] Raw response: {raw[:500]}")
-            raise ValueError(f"Invalid JSON from LLM: {str(e)}")
+            # Transform LLM output to IntentModel with EntityModel objects
+            entities = self._parse_entities(data.get("entities", []))
 
-        # Transform LLM output to IntentModel with EntityModel objects
+            intent = IntentModel(
+                app_name=data.get("app_name", "Application"),
+                description=data.get("description", ""),
+                entities=entities,
+                roles=data.get("roles", ["admin", "user"]),
+                features=data.get("features", []),
+                integrations=data.get("integrations", [])
+            )
+
+            confidence = self._calculate_confidence(intent)
+            logger.info(
+                f"[OpenRouter] Intent extraction complete. "
+                f"Confidence: {confidence:.2f}. Entities: {len(entities)}"
+            )
+
+            return IntentExtractionResult(
+                intent=intent,
+                confidence=confidence,
+                raw_response=raw
+            )
+
+        except Exception as e:
+            logger.error(f"[OpenRouter] Error during intent extraction: {e}")
+            raise
+
+    @staticmethod
+    def _parse_entities(entity_list: list) -> list:
+        """Parse entity data from LLM response"""
         entities = []
-        if "entities" in data and data["entities"]:
-            for entity_data in data["entities"]:
-                attributes = []
-                if "attributes" in entity_data:
-                    for attr_data in entity_data["attributes"]:
-                        attributes.append(
-                            AttributeModel(
-                                name=attr_data.get("name", "field"),
-                                type=attr_data.get("type", "text"),
-                                nullable=attr_data.get("nullable", False),
-                                is_primary=attr_data.get("is_primary", False),
-                                description=attr_data.get("description", "")
-                            )
+
+        for entity_data in entity_list:
+            attributes = []
+
+            if "attributes" in entity_data:
+                for attr_data in entity_data["attributes"]:
+                    attributes.append(
+                        AttributeModel(
+                            name=attr_data.get("name", "field"),
+                            type=attr_data.get("type", "text"),
+                            nullable=attr_data.get("nullable", False),
+                            is_primary=attr_data.get("is_primary", False),
+                            description=attr_data.get("description", "")
                         )
-                
-                # Ensure every entity has at least an id field
-                if not any(attr.is_primary for attr in attributes):
-                    attributes.insert(0, AttributeModel(
-                        name="id",
-                        type="uuid",
-                        nullable=False,
-                        is_primary=True,
-                        description="Unique identifier"
-                    ))
-                
-                entities.append(
-                    EntityModel(
-                        name=entity_data.get("name", "Entity"),
-                        description=entity_data.get("description", ""),
-                        attributes=attributes
                     )
+
+            # Ensure every entity has at least an id field
+            if not any(attr.is_primary for attr in attributes):
+                attributes.insert(0, AttributeModel(
+                    name="id",
+                    type="uuid",
+                    nullable=False,
+                    is_primary=True,
+                    description="Unique identifier"
+                ))
+
+            entities.append(
+                EntityModel(
+                    name=entity_data.get("name", "Entity"),
+                    description=entity_data.get("description", ""),
+                    attributes=attributes
                 )
+            )
 
-        intent = IntentModel(
-            app_name=data.get("app_name", "Application"),
-            description=data.get("description", ""),
-            entities=entities,
-            roles=data.get("roles", ["admin", "user"]),
-            features=data.get("features", []),
-            integrations=data.get("integrations", [])
-        )
+        return entities
 
-        confidence = self._calculate_confidence(intent, raw)
-
-        return IntentExtractionResult(
-            intent=intent,
-            confidence=confidence,
-            raw_response=raw
-        )
-
-    def _calculate_confidence(self, intent: IntentModel, raw_response: str) -> float:
-        """Calculate confidence score based on completeness of extracted data"""
+    @staticmethod
+    def _calculate_confidence(intent: IntentModel) -> float:
+        """Calculate confidence score based on completeness"""
         score = 0.5
-        
+
         if intent.app_name and len(intent.app_name) > 0:
             score += 0.1
         if intent.description and len(intent.description) > 0:
@@ -212,5 +223,5 @@ RULES:
             score += 0.1
         if len(intent.features) > 0:
             score += 0.1
-        
+
         return min(0.99, score)

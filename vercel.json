@@ -1,5 +1,9 @@
 {
   "version": 2,
+  "buildCommand": "pip install -r requirements.txt && npm install",
+  "devCommand": "python main.py",
+  "installCommand": "pip install -r requirements.txt",
+  "framework": "flask",
   "builds": [
     {
       "src": "main.py",
@@ -20,16 +24,34 @@
       "dest": "/static/$1"
     },
     {
+      "src": "/health",
+      "dest": "/main.py"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/main.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "/main.py"
     }
   ],
   "env": {
-    "FLASK_ENV": "production"
+    "ENVIRONMENT": "production",
+    "FLASK_ENV": "production",
+    "LOG_LEVEL": "INFO"
   },
   "git": {
     "deploymentEnabled": {
-      "main": true
+      "main": true,
+      "compiler-system": true
+    }
+  },
+  "regions": ["iad1"],
+  "functions": {
+    "main.py": {
+      "memory": 1024,
+      "maxDuration": 60
     }
   }
 }
