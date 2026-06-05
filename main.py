@@ -567,17 +567,9 @@ def internal_error(error):
 # Application Entry Point
 # ============================
 
-if __name__ == '__main__':
-    port = Config.PORT
-    debug = Config.DEBUG
-
-    logger.info(f"[Main] Starting server on {Config.HOST}:{port}")
-    logger.info(f"[Main] Debug mode: {debug}")
-    logger.info(f"[Main] Configuration: {Config.to_dict()}")
-
+if __name__ == "__main__":
     app.run(
-        host=Config.HOST,
-        port=port,
-        debug=debug,
-        use_reloader=False  # Important for Vercel deployment
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=False
     )
