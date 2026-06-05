@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Application Compiler - Generate Full-Stack Apps</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🚀 AI Application Compiler</h1>
+                <p class="subtitle">Transform natural language into production-ready app specifications</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Input Section -->
+            <section class="input-section">
+                <div class="input-card">
+                    <h2>Describe Your Application</h2>
+                    <p class="help-text">Enter a natural language description of the application you want to build. Include entities, features, roles, and requirements.</p>
+                    
+                    <textarea 
+                        id="promptInput" 
+                        placeholder="Example: Build a CRM system with users, contacts, companies, role-based access (admin/user), and Stripe payment integration. Admins can view analytics and manage all records. Users can only view their own contacts."
+                        rows="6"></textarea>
+
+                    <div class="input-actions">
+                        <button id="compileBtn" class="btn btn-primary">Compile Application</button>
+                        <button id="clearBtn" class="btn btn-secondary">Clear</button>
+                    </div>
+
+                    <div id="errorMsg" class="error-message" style="display: none;"></div>
+                    <div id="loadingMsg" class="loading-message" style="display: none;">
+                        <span class="spinner"></span> Compiling your application...
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <div class="results-card">
+                    <div class="results-header">
+                        <h2 id="appName">Application Specification</h2>
+                        <button id="downloadBtn" class="btn btn-small">Download JSON</button>
+                    </div>
+
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="overview">Overview</button>
+                        <button class="tab-btn" data-tab="database">Database</button>
+                        <button class="tab-btn" data-tab="api">API</button>
+                        <button class="tab-btn" data-tab="ui">UI</button>
+                        <button class="tab-btn" data-tab="auth">Auth</button>
+                        <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+                    </div>
+
+                    <!-- Tab Contents -->
+                    <div class="tab-content">
+                        <!-- Overview Tab -->
+                        <div class="tab-pane active" id="overview">
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <h3>Application</h3>
+                                    <p id="overviewApp"></p>
+                                </div>
+                                <div class="info-item">
+                                    <h3>Description</h3>
+                                    <p id="overviewDesc"></p>
+                                </div>
+                                <div class="info-item">
+                                    <h3>Entities</h3>
+                                    <ul id="overviewEntities"></ul>
+                                </div>
+                                <div class="info-item">
+                                    <h3>Roles</h3>
+                                    <ul id="overviewRoles"></ul>
+                                </div>
+                                <div class="info-item">
+                                    <h3>Features</h3>
+                                    <ul id="overviewFeatures"></ul>
+                                </div>
+                                <div class="info-item">
+                                    <h3>Integrations</h3>
+                                    <ul id="overviewIntegrations"></ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Database Tab -->
+                        <div class="tab-pane" id="database">
+                            <div id="dbContent" class="schema-content"></div>
+                        </div>
+
+                        <!-- API Tab -->
+                        <div class="tab-pane" id="api">
+                            <div id="apiContent" class="schema-content"></div>
+                        </div>
+
+                        <!-- UI Tab -->
+                        <div class="tab-pane" id="ui">
+                            <div id="uiContent" class="schema-content"></div>
+                        </div>
+
+                        <!-- Auth Tab -->
+                        <div class="tab-pane" id="auth">
+                            <div id="authContent" class="schema-content"></div>
+                        </div>
+
+                        <!-- Diagnostics Tab -->
+                        <div class="tab-pane" id="diagnostics">
+                            <div class="diagnostics-grid">
+                                <div class="diagnostic-item">
+                                    <h3>Confidence Score</h3>
+                                    <div class="confidence-score" id="confidenceScore"></div>
+                                </div>
+                                <div class="diagnostic-item">
+                                    <h3>Warnings</h3>
+                                    <ul id="warningsList"></ul>
+                                </div>
+                                <div class="diagnostic-item">
+                                    <h3>Assumptions</h3>
+                                    <ul id="assumptionsList"></ul>
+                                </div>
+                                <div class="diagnostic-item">
+                                    <h3>Repairs</h3>
+                                    <ul id="repairsList"></ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Features Grid -->
+            <section class="features-section">
+                <h2>System Architecture</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <h3>📝 Intent Extraction</h3>
+                        <p>NLP-powered parsing converts natural language into structured intent with entities and attributes</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🏗️ IR Generation</h3>
+                        <p>Application Intermediate Representation serves as single source of truth for all layers</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🛡️ Validation</h3>
+                        <p>Multi-layer validation ensures schema consistency across database, API, and UI</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🔧 Repair Engine</h3>
+                        <p>Intelligent targeted repairs fix component-specific issues without full regeneration</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🚀 Runtime Simulator</h3>
+                        <p>Simulates execution to ensure the generated specification is actually executable</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📊 Diagnostics</h3>
+                        <p>Comprehensive reports with confidence scores, assumptions, and repair history</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>AI Application Compiler v2.0 - Production-Ready Compiler Pipeline</p>
+            <p><a href="https://github.com/chrg613/ai-app-compiler">GitHub Repository</a></p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
