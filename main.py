@@ -27,7 +27,7 @@ CORS(app)
 # Initialize LLM Provider
 api_key = os.getenv("OPENROUTER_API_KEY")
 if not api_key:
-    logger.warning("[v0] OPENROUTER_API_KEY not set. Using fallback.")
+    logger.warning(" OPENROUTER_API_KEY not set. Using fallback.")
     api_key = "test-key"
 
 llm_provider = OpenRouterProvider(api_key)
