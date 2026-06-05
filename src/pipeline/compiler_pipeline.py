@@ -180,7 +180,7 @@ class CompilerPipeline:
                 repairs
             )
         )
-        Exporter.export(
+        export_result = Exporter.export(
             ir.app_name,
             db_schema,
             api_schema,
@@ -193,5 +193,6 @@ class CompilerPipeline:
             "api": api_schema,
             "ui": ui_schema,
             "auth": auth_schema,
-            "diagnostics": diagnostics
+            "diagnostics": diagnostics,
+            "project_dir": export_result.get('project_dir') if export_result else None
         }

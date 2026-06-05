@@ -73,10 +73,11 @@ class FlaskGenerator:
     def _generate_endpoint(endpoint) -> List[str]:
         """Generate a single API endpoint with real logic"""
         lines: List[str] = []
-        route = endpoint.path.replace("{id}", "<id>")
+        # Namespace all API routes under /api/ to avoid collisions with UI routes
+        route = f"/api{endpoint.path}".replace("{id}", "<id>")
         function_name = FlaskGenerator._sanitize_function_name(
             f"{endpoint.method.lower()}_{endpoint.entity_name.lower()}_"
-            f"{'by_id' if '<id>' in route else 'list'}"
+            f"{'by_id' if '<id>' in endpoint.path else 'list'}"
         )
 
         method_upper = endpoint.method.upper()
@@ -147,7 +148,7 @@ class FlaskGenerator:
         # Add error handling
         lines.extend([
             "    except Exception as e:",
-            "        logger.error(f'Error in {}: {{e}}'.format(__name__))",
+            f"        logger.error(f'Error in {endpoint.entity_name}: {{e}}')",
             "        return jsonify({'error': str(e)}), 500",
         ])
 
@@ -157,7 +158,9 @@ class FlaskGenerator:
     def _generate_page_route(page) -> List[str]:
         """Generate a UI page route"""
         lines: List[str] = []
-        route = page.route or f"/{page.name.lower()}"
+        # Namespace UI routes under /ui/ to avoid collisions with API routes
+        page_route = page.route or f"/{page.name.lower()}"
+        route = f"/ui{page_route}"
         function_name = FlaskGenerator._sanitize_function_name(page.name.lower())
 
         auth_check = "    # TODO: Add auth check if required" if page.requires_auth else ""

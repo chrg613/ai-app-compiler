@@ -474,7 +474,7 @@ def refine_requirements(conv_id):
 
 @app.route('/api/conversation/<conv_id>/generate-app', methods=['POST'])
 def generate_app(conv_id):
-    """Generate downloadable app from final requirements"""
+    """Generate downloadable app from final requirements - exports entire generated folder"""
     try:
         if conv_id not in CONVERSATIONS:
             return jsonify({'error': 'Conversation not found'}), 404
@@ -483,41 +483,35 @@ def generate_app(conv_id):
         if not conv['current_intent']:
             return jsonify({'error': 'No active compilation'}), 400
 
-        # Extract intent from result dict
         result = conv['current_intent']
+        project_dir = result.get('project_dir') if isinstance(result, dict) else None
         intent = result['intent'] if isinstance(result, dict) else result
-        ir = result['ir'] if isinstance(result, dict) else getattr(result, 'ir', None)
         
-        app_name = intent.app_name if hasattr(intent, 'app_name') else 'GeneratedApp'
-        description = intent.description if hasattr(intent, 'description') else 'Generated Application'
+        if not project_dir or not os.path.exists(project_dir):
+            logger.error(f"[Generate] Project directory not found: {project_dir}")
+            return jsonify({'error': 'Generated app not found. Please compile first.'}), 400
 
-        # Create in-memory ZIP
+        # Get app name from intent
+        app_name = intent.app_name if hasattr(intent, 'app_name') else 'generated_app'
+        
+        # Create ZIP of entire generated folder
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Add app code
-            app_py = "# Generated Flask Application\n# See main compilation for full code\n"
-            zf.writestr('app.py', app_py)
-
-            # Add requirements
-            zf.writestr('requirements.txt', 'flask>=3.0.0\nflask-cors>=4.0.0\n')
-
-            # Add README
-            readme = f"# {app_name}\n\n{description}\n\n## Generated from AI Compiler\n"
-            if ir and hasattr(ir, 'entities'):
-                readme += f"\nEntities: {', '.join(e.name for e in ir.entities)}\n"
-            zf.writestr('README.md', readme)
-
-            # Add conversation history
-            history_json = json.dumps(conv['messages'], indent=2, default=serialize_result)
-            zf.writestr('conversation_history.json', history_json)
+            # Walk through project_dir and add all files
+            for root, dirs, files in os.walk(project_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Create archive name relative to project_dir parent
+                    arcname = os.path.relpath(file_path, os.path.dirname(project_dir))
+                    zf.write(file_path, arcname)
 
         zip_buffer.seek(0)
         
-        logger.info(f"[Generate] Generated app download for conversation {conv_id}")
+        logger.info(f"[Generate] Exported complete app from {project_dir} for conversation {conv_id}")
 
         return zip_buffer.getvalue(), 200, {
             'Content-Type': 'application/zip',
-            'Content-Disposition': f"attachment; filename=app_{conv_id[:8]}.zip"
+            'Content-Disposition': f"attachment; filename={app_name}.zip"
         }
 
     except Exception as e:
