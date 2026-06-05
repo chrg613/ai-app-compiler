@@ -179,13 +179,8 @@ class FlaskGenerator:
 
     @staticmethod
     def _generate_main() -> List[str]:
-        """Generate main block"""
+        """Generate main block - DO NOT add home or health routes (framework provides these)"""
         return [
-            "",
-            "# Health check endpoint",
-            "@app.route('/app-health')",
-            "def app_health():",
-            "    return jsonify({'status': 'healthy'}), 200",
             "",
             "if __name__ == '__main__':",
             "    port = int(os.getenv('PORT', 5000))",

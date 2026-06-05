@@ -297,20 +297,34 @@ def add_message(conv_id):
         # Get AI response with assumptions
         try:
             result = compiler_pipeline.compile(full_prompt)
+            intent = result['intent']
+            
+            # Extract assumptions from intent
+            entities = [e.name for e in intent.entities] if hasattr(intent, 'entities') and intent.entities else []
+            roles = intent.roles if hasattr(intent, 'roles') and intent.roles else ['user', 'admin']
+            features = intent.features if hasattr(intent, 'features') and intent.features else []
+            integrations = intent.integrations if hasattr(intent, 'integrations') and intent.integrations else []
             
             assumptions = {
-                'entities': [e.name for e in result.intent.entities] if hasattr(result.intent, 'entities') else [],
-                'roles': result.intent.roles if hasattr(result.intent, 'roles') else ['user', 'admin'],
-                'features': result.intent.features if hasattr(result.intent, 'features') else [],
-                'integrations': result.intent.integrations if hasattr(result.intent, 'integrations') else []
+                'entities': entities,
+                'roles': roles,
+                'features': features[:5],  # Limit to first 5
+                'integrations': integrations
             }
+
+            # Generate clarification question based on extracted data
+            confidence = len(entities) > 0 and len(roles) > 0
+            if not confidence:
+                next_question = "I need more details. Can you tell me: what entities (data objects) does your app need? And who are the different user roles?"
+            else:
+                next_question = f"I've identified {len(entities)} entities and {len(roles)} user roles. Does this match your vision? Any changes?"
 
             ai_response = {
                 'type': 'assumptions',
-                'message': f"Based on your requirements, I've identified: {', '.join(assumptions['entities'])} entities",
+                'message': f"Based on your requirements, I've identified: {', '.join(entities)} entities",
                 'assumptions': assumptions,
-                'confidence': 0.85,
-                'next_question': "Does this look correct? Any changes or additional requirements?"
+                'confidence': 0.9 if confidence else 0.6,
+                'next_question': next_question
             }
 
             conv['messages'].append({
@@ -321,7 +335,7 @@ def add_message(conv_id):
                 'timestamp': datetime.utcnow().isoformat()
             })
 
-            conv['current_intent'] = result.intent
+            conv['current_intent'] = result
 
             return jsonify({
                 'status': 'success',
@@ -362,38 +376,100 @@ def refine_requirements(conv_id):
             return jsonify({'error': 'Conversation not found'}), 404
 
         data = request.get_json() or {}
-        changes = data.get('changes', {})
+        refinement = data.get('changes', '').strip()
+
+        if not refinement:
+            return jsonify({'error': 'No changes provided'}), 400
 
         conv = CONVERSATIONS[conv_id]
         if not conv['current_intent']:
             return jsonify({'error': 'No active compilation'}), 400
 
-        # Log refinement
-        refinement_msg = f"Updated requirements: {', '.join(f'{k}: {v}' for k, v in changes.items())}"
+        # Add refinement as new user message
         conv['messages'].append({
             'role': 'user',
-            'content': refinement_msg,
+            'content': refinement,
             'timestamp': datetime.utcnow().isoformat()
         })
 
-        # Recompile with changes
+        # Rebuild full context from all messages
         full_prompt = "\n".join([
             m['content'] for m in conv['messages'] if m['role'] == 'user'
         ])
 
-        result = compiler_pipeline.compile(full_prompt)
-        conv['current_intent'] = result.intent
+        logger.info(f"[Refine] Recompiling for {conv_id} with refinement: {refinement[:50]}...")
 
-        return jsonify({
-            'status': 'success',
-            'conversation_id': conv_id,
-            'message': 'Requirements updated and recompiled',
-            'updated_intent': json.loads(json.dumps(result.intent, default=serialize_result))
-        }), 200
+        # Recompile with accumulated context
+        try:
+            result = compiler_pipeline.compile(full_prompt)
+            intent = result['intent']
+            
+            # Extract updated assumptions
+            entities = [e.name for e in intent.entities] if hasattr(intent, 'entities') and intent.entities else []
+            roles = intent.roles if hasattr(intent, 'roles') and intent.roles else ['user', 'admin']
+            features = intent.features if hasattr(intent, 'features') and intent.features else []
+            integrations = intent.integrations if hasattr(intent, 'integrations') and intent.integrations else []
+            
+            updated_assumptions = {
+                'entities': entities,
+                'roles': roles,
+                'features': features[:5],
+                'integrations': integrations
+            }
+
+            # Store the updated result
+            conv['current_intent'] = result
+
+            # Add AI response with updated assumptions
+            next_question = f"Updated! Now I see {len(entities)} entities and {len(roles)} roles. Anything else to adjust?"
+            
+            ai_response = {
+                'type': 'assumptions',
+                'message': f"Requirements updated. New structure: {', '.join(entities)}",
+                'assumptions': updated_assumptions,
+                'confidence': 0.9 if entities else 0.6,
+                'next_question': next_question
+            }
+
+            conv['messages'].append({
+                'role': 'assistant',
+                'content': ai_response['message'],
+                'type': 'assumptions',
+                'assumptions': updated_assumptions,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+
+            logger.info(f"[Refine] Recompilation successful for {conv_id}")
+
+            return jsonify({
+                'status': 'success',
+                'conversation_id': conv_id,
+                'response': ai_response,
+                'messages': conv['messages']
+            }), 200
+
+        except Exception as compile_error:
+            logger.error(f"[Refine] Recompilation failed: {compile_error}")
+            error_msg = f"Clarification needed: {str(compile_error)[:100]}"
+            conv['messages'].append({
+                'role': 'assistant',
+                'content': error_msg,
+                'type': 'clarification',
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            return jsonify({
+                'status': 'clarification_needed',
+                'conversation_id': conv_id,
+                'response': {
+                    'type': 'clarification',
+                    'message': error_msg
+                },
+                'messages': conv['messages']
+            }), 200
 
     except Exception as e:
-        logger.error(f"[Refine] Error refining requirements: {e}")
-        return jsonify({'error': 'Failed to refine requirements'}), 500
+        logger.error(f"[Refine] Error refining requirements: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to refine requirements: {str(e)}'}), 500
 
 
 @app.route('/api/conversation/<conv_id>/generate-app', methods=['POST'])
@@ -407,6 +483,14 @@ def generate_app(conv_id):
         if not conv['current_intent']:
             return jsonify({'error': 'No active compilation'}), 400
 
+        # Extract intent from result dict
+        result = conv['current_intent']
+        intent = result['intent'] if isinstance(result, dict) else result
+        ir = result['ir'] if isinstance(result, dict) else getattr(result, 'ir', None)
+        
+        app_name = intent.app_name if hasattr(intent, 'app_name') else 'GeneratedApp'
+        description = intent.description if hasattr(intent, 'description') else 'Generated Application'
+
         # Create in-memory ZIP
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -418,7 +502,9 @@ def generate_app(conv_id):
             zf.writestr('requirements.txt', 'flask>=3.0.0\nflask-cors>=4.0.0\n')
 
             # Add README
-            readme = f"# {conv['current_intent'].app_name}\n\n{conv['current_intent'].description}\n"
+            readme = f"# {app_name}\n\n{description}\n\n## Generated from AI Compiler\n"
+            if ir and hasattr(ir, 'entities'):
+                readme += f"\nEntities: {', '.join(e.name for e in ir.entities)}\n"
             zf.writestr('README.md', readme)
 
             # Add conversation history
@@ -429,14 +515,14 @@ def generate_app(conv_id):
         
         logger.info(f"[Generate] Generated app download for conversation {conv_id}")
 
-        return zf.getvalue(), 200, {
+        return zip_buffer.getvalue(), 200, {
             'Content-Type': 'application/zip',
             'Content-Disposition': f"attachment; filename=app_{conv_id[:8]}.zip"
         }
 
     except Exception as e:
-        logger.error(f"[Generate] Error generating app: {e}")
-        return jsonify({'error': 'Failed to generate app'}), 500
+        logger.error(f"[Generate] Error generating app: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to generate app: {str(e)}'}), 500
 
 
 @app.route('/api/conversation/<conv_id>', methods=['GET'])

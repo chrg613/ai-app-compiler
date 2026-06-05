@@ -259,7 +259,9 @@ class CompilerChat {
     }
 
     this.closeModal(this.modifyModal);
-    this.addMessage('user', `Changes: ${changes}`);
+    this.addMessage('user', changes);
+    this.statusBadge.textContent = 'Refining...';
+    this.modifyInput.value = '';
 
     try {
       const response = await fetch(`/api/conversation/${this.conversationId}/refine`, {
@@ -271,11 +273,21 @@ class CompilerChat {
       if (!response.ok) throw new Error('Failed to apply changes');
 
       const data = await response.json();
-      this.addMessage('assistant', '✅ Requirements updated and recompiled!');
-      this.modifyInput.value = '';
+      
+      if (data.status === 'success' && data.response.type === 'assumptions') {
+        // Show updated assumptions
+        this.addMessage('assistant', data.response.message);
+        this.showAssumptions(data.response);
+        this.updatePreview(data.response.assumptions);
+        this.statusBadge.textContent = 'Ready';
+      } else if (data.status === 'clarification_needed') {
+        this.addMessage('assistant', data.response.message);
+        this.statusBadge.textContent = 'Needs Clarification';
+      }
     } catch (error) {
       console.error('[Chat] Error applying changes:', error);
-      this.addMessage('assistant', `❌ Error applying changes: ${error.message}`);
+      this.addMessage('assistant', `Error: ${error.message}`);
+      this.statusBadge.textContent = 'Error';
     }
   }
 
