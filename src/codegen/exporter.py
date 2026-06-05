@@ -8,6 +8,8 @@ from src.codegen.file_writer import FileWriter
 from src.codegen.requirements_generator import RequirementsGenerator
 from src.codegen.readme_generator import ReadmeGenerator
 from src.codegen.html_generator import HTMLGenerator
+from src.codegen.css_generator import CSSGenerator
+from src.codegen.js_generator import JSGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,16 @@ class Exporter:
                 FileWriter.write(f"{project_dir}/templates", filename, content)
             logger.info(f"[Exporter] Generated {len(html_pages)} HTML pages")
 
+            # CSS stylesheet
+            css = CSSGenerator.generate()
+            FileWriter.write(f"{project_dir}/static/css", "style.css", css)
+            logger.info("[Exporter] Generated style.css")
+
+            # JavaScript utilities
+            js = JSGenerator.generate()
+            FileWriter.write(f"{project_dir}/static/js", "app.js", js)
+            logger.info("[Exporter] Generated app.js")
+
             # Environment template
             env_template = Exporter._generate_env_template()
             FileWriter.write(project_dir, ".env.example", env_template)
@@ -96,11 +108,13 @@ class Exporter:
             return {
                 'status': 'success',
                 'project_dir': project_dir,
-                'files_created': 8 + len(html_pages),
+                'files_created': 10 + len(html_pages),
                 'schemas': {
                     'database': 'schema.sql',
                     'api': 'app.py',
-                    'ui': 'templates/*'
+                    'ui': 'templates/*',
+                    'styling': 'static/css/style.css',
+                    'scripts': 'static/js/app.js'
                 }
             }
 

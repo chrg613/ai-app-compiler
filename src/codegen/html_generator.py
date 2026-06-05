@@ -91,8 +91,9 @@ class HTMLGenerator:
 
     @staticmethod
     def _generate_table_component(component) -> str:
-        """Generate table component HTML"""
+        """Generate table component HTML with API integration"""
         entity = component.entity_binding or "Items"
+        entity_lower = entity.lower()
         columns = component.properties.get("columns", [])
 
         header_cells = "".join(
@@ -102,25 +103,64 @@ class HTMLGenerator:
         return f"""            <section class="component component-table">
                 <div class="table-header">
                     <h2>{entity} List</h2>
-                    <button class="btn btn-primary">New {entity}</button>
+                    <button class="btn btn-primary" onclick="openNewModal('{entity_lower}')">New {entity}</button>
                 </div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            {header_cells}
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="{entity.lower()}-table-body">
-                        <!-- Table rows loaded dynamically -->
-                    </tbody>
-                </table>
-            </section>"""
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                {header_cells}
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="{entity_lower}-table-body">
+                            <tr><td colspan="{len(columns) + 1}"><em>Loading...</em></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <script>
+            // Load {entity} data from API
+            async function load{entity}() {{
+                try {{
+                    const response = await fetch('/api/{entity_lower}');
+                    const data = await response.json();
+                    const tbody = document.getElementById('{entity_lower}-table-body');
+                    tbody.innerHTML = '';
+                    
+                    if (!data || data.length === 0) {{
+                        tbody.innerHTML = '<tr><td colspan="{len(columns) + 1}"><em>No records found</em></td></tr>';
+                        return;
+                    }}
+                    
+                    data.forEach(record => {{
+                        const row = tbody.insertRow();
+                        {chr(10).join(f"row.insertCell().textContent = record['{col}'] || '';" for col in columns)}
+                        const actionsCell = row.insertCell();
+                        actionsCell.innerHTML = `
+                            <button class="btn btn-sm" onclick="edit{entity}(record.id)">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="delete{entity}(record.id)">Delete</button>
+                        `;
+                    }});
+                }} catch (e) {{
+                    console.error('Error loading {entity}:', e);
+                    document.getElementById('{entity_lower}-table-body').innerHTML = '<tr><td colspan="{len(columns) + 1}"><em>Error loading data</em></td></tr>';
+                }}
+            }}
+            
+            // Load on page load
+            if (document.readyState === 'loading') {{
+                document.addEventListener('DOMContentLoaded', load{entity});
+            }} else {{
+                load{entity}();
+            }}
+            </script>"""
 
     @staticmethod
     def _generate_form_component(component) -> str:
-        """Generate form component HTML"""
+        """Generate form component HTML with API integration"""
         entity = component.entity_binding or "Item"
+        entity_lower = entity.lower()
         fields = component.properties.get("fields", [])
 
         form_fields = []
@@ -153,14 +193,54 @@ class HTMLGenerator:
 
         return f"""            <section class="component component-form">
                 <h2>{entity} Form</h2>
-                <form id="{entity.lower()}-form" class="data-form">
+                <form id="{entity_lower}-form" class="data-form" onsubmit="submit{entity}Form(event)">
 {form_content}
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">Save</button>
                         <button type="reset" class="btn btn-secondary">Clear</button>
                     </div>
+                    <div id="{entity_lower}-form-message" class="form-message"></div>
                 </form>
-            </section>"""
+            </section>
+            <script>
+            async function submit{entity}Form(event) {{
+                event.preventDefault();
+                const form = event.target;
+                const messageDiv = document.getElementById('{entity_lower}-form-message');
+                messageDiv.textContent = 'Saving...';
+                messageDiv.className = 'form-message info';
+                
+                try {{
+                    const formData = new FormData(form);
+                    const data = Object.fromEntries(formData);
+                    
+                    const response = await fetch('/api/{entity_lower}', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(data)
+                    }});
+                    
+                    if (!response.ok) {{
+                        throw new Error(`HTTP ${{response.status}}`);
+                    }}
+                    
+                    messageDiv.textContent = '{entity} saved successfully!';
+                    messageDiv.className = 'form-message success';
+                    form.reset();
+                    
+                    // Refresh table if it exists
+                    if (typeof load{entity} === 'function') {{
+                        load{entity}();
+                    }}
+                    
+                    setTimeout(() => messageDiv.textContent = '', 3000);
+                }} catch (e) {{
+                    messageDiv.textContent = 'Error saving {entity}: ' + e.message;
+                    messageDiv.className = 'form-message error';
+                    console.error(e);
+                }}
+            }}
+            </script>"""
 
     @staticmethod
     def _generate_button_component(component) -> str:
