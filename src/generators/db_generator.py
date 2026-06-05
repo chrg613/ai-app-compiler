@@ -42,15 +42,17 @@ class DatabaseGenerator:
             columns = []
 
             for attribute in entity.attributes:
+                # Get SQL type but keep field type lowercase for ColumnSchema
+                field_type = attribute.type.lower()
                 sql_type = DatabaseGenerator.TYPE_MAPPING.get(
-                    attribute.type.lower(),
+                    field_type,
                     "TEXT"
                 )
 
                 columns.append(
                     ColumnSchema(
                         name=DatabaseGenerator.to_snake_case(attribute.name),
-                        type=sql_type,
+                        type=field_type,
                         nullable=attribute.nullable,
                         is_primary=attribute.is_primary,
                         description=attribute.description

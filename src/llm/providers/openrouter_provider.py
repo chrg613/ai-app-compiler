@@ -175,10 +175,12 @@ RULES:
 
             if "attributes" in entity_data:
                 for attr_data in entity_data["attributes"]:
+                    # Normalize type to lowercase to handle LLM returning uppercase
+                    attr_type = attr_data.get("type", "text").lower()
                     attributes.append(
                         AttributeModel(
                             name=attr_data.get("name", "field"),
-                            type=attr_data.get("type", "text"),
+                            type=attr_type,
                             nullable=attr_data.get("nullable", False),
                             is_primary=attr_data.get("is_primary", False),
                             description=attr_data.get("description", "")
