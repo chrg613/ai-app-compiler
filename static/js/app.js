@@ -4,7 +4,7 @@ class CompilerChat {
     this.conversationId = null;
     this.currentIntent = null;
     this.isLoading = false;
-    
+
     this.init();
   }
 
@@ -23,12 +23,12 @@ class CompilerChat {
     this.statusBadge = document.getElementById('status-badge');
     this.downloadBtn = document.getElementById('download-btn');
     this.newConvBtn = document.getElementById('new-conversation-btn');
-    
+
     this.assumptionsModal = document.getElementById('assumptions-modal');
     this.assumptionsBody = document.getElementById('assumptions-body');
     this.approveBtn = document.getElementById('approve-btn');
     this.modifyBtn = document.getElementById('modify-btn');
-    
+
     this.modifyModal = document.getElementById('modify-modal');
     this.modifyInput = document.getElementById('modify-input');
     this.applyChangesBtn = document.getElementById('apply-changes-btn');
@@ -40,7 +40,7 @@ class CompilerChat {
     this.clearBtn.addEventListener('click', () => this.userInput.value = '');
     this.newConvBtn.addEventListener('click', () => this.startNewConversation());
     this.downloadBtn.addEventListener('click', () => this.downloadApp());
-    
+
     this.userInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && e.ctrlKey) this.sendMessage();
     });
@@ -67,11 +67,11 @@ class CompilerChat {
       });
 
       if (!response.ok) throw new Error('Failed to start conversation');
-      
+
       const data = await response.json();
       this.conversationId = data.conversation_id;
       this.currentIntent = null;
-      
+
       this.chatMessages.innerHTML = `
         <div class="message assistant-message welcome">
           <div class="message-content">
@@ -87,14 +87,14 @@ class CompilerChat {
           </div>
         </div>
       `;
-      
+
       this.previewContent.innerHTML = `
         <div class="empty-state">
           <div class="icon">🚀</div>
           <p>Your app structure will appear here</p>
         </div>
       `;
-      
+
       this.downloadBtn.disabled = true;
       this.statusBadge.textContent = 'Ready';
       console.log('[Chat] Started conversation:', this.conversationId);
@@ -128,7 +128,7 @@ class CompilerChat {
       if (!response.ok) throw new Error('Failed to send message');
 
       const data = await response.json();
-      
+
       if (data.status === 'success' && data.response.type === 'assumptions') {
         // Show assumptions modal
         this.showAssumptions(data.response);
@@ -153,23 +153,23 @@ class CompilerChat {
   addMessage(role, content) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}-message`;
-    
+
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
+
     messageDiv.innerHTML = `
       <div class="message-content">
         <p>${this.escapeHtml(content)}</p>
         <small class="timestamp">${timestamp}</small>
       </div>
     `;
-    
+
     this.chatMessages.appendChild(messageDiv);
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
   }
 
   showAssumptions(response) {
     const { assumptions, confidence, next_question } = response;
-    
+
     const html = `
       <div class="assumptions-container">
         <div class="assumption-item">
@@ -210,7 +210,7 @@ class CompilerChat {
         </div>
       </div>
     `;
-    
+
     this.assumptionsBody.innerHTML = html;
     this.openModal(this.assumptionsModal);
   }
@@ -247,7 +247,7 @@ class CompilerChat {
         </div>
       </div>
     `;
-    
+
     this.previewContent.innerHTML = html;
   }
 
@@ -260,7 +260,7 @@ class CompilerChat {
 
     this.closeModal(this.modifyModal);
     this.addMessage('user', `Changes: ${changes}`);
-    
+
     try {
       const response = await fetch(`/api/conversation/${this.conversationId}/refine`, {
         method: 'POST',
